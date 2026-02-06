@@ -76,9 +76,12 @@ python -c "import sageattention; print(f'SageAttention: {sageattention.__version
 # ==========================================
 echo ""
 echo "Starting ComfyUI with SageAttention..."
+NETLOG="$NETVOLUME/comfyui_debug.log"
 python /ComfyUI/main.py --listen > /tmp/comfyui.log 2>&1 &
 COMFYUI_PID=$!
-echo "ComfyUI started with PID=$COMFYUI_PID, logs at /tmp/comfyui.log"
+# Mirror logs to network volume (persists across crashes for debugging)
+tail -f /tmp/comfyui.log > "$NETLOG" 2>/dev/null &
+echo "ComfyUI started with PID=$COMFYUI_PID, logs at /tmp/comfyui.log + $NETLOG"
 
 # ==========================================
 # Wait for ComfyUI (up to 180s / 3 min)

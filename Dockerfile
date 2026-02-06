@@ -55,7 +55,10 @@ RUN cd /ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper && pip install -r requireme
     cd /ComfyUI/custom_nodes/ComfyUI-SCAIL-pose && pip install -r requirements.txt
 
 # GPU acceleration
-RUN pip install onnxruntime-gpu==1.22.0 triton taichi
+# CRITICAL: Use onnxruntime (CPU) NOT onnxruntime-gpu
+# onnxruntime-gpu<=1.22 crashes on SM120 (Blackwell/RTX 5090) with cudaErrorInvalidPtx
+# VitPose/YOLO run on CPU via CPUExecutionProvider (set in workflow JSON + handler.py)
+RUN pip uninstall -y onnxruntime-gpu 2>/dev/null; pip install onnxruntime triton taichi
 
 # Model directories (symlinked to network volume at runtime)
 RUN mkdir -p /ComfyUI/models/diffusion_models \

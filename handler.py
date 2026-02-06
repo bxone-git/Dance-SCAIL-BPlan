@@ -38,29 +38,50 @@ def get_history(prompt_id):
         return json.loads(response.read())
 
 
+def get_comfyui_log_tail(lines=100):
+    """Capture ComfyUI log tail for diagnostics"""
+    try:
+        with open('/tmp/comfyui.log', 'r') as f:
+            return f.read()[-4000:]
+    except:
+        return "Could not read ComfyUI log"
+
+
 def get_videos(ws, prompt):
     prompt_id = queue_prompt(prompt)['prompt_id']
     output_videos = {}
 
     ws.settimeout(900)
+    last_node = "unknown"
 
     try:
         while True:
             try:
                 out = ws.recv()
             except websocket.WebSocketTimeoutException:
-                raise Exception("Video generation timeout (10min)")
+                log_tail = get_comfyui_log_tail()
+                raise Exception(f"Video generation timeout (15min). Last node: {last_node}. ComfyUI log: {log_tail}")
 
             if isinstance(out, str):
                 message = json.loads(out)
-                if message['type'] == 'executing':
+                msg_type = message.get('type', '')
+                if msg_type == 'executing':
                     data = message['data']
-                    if data['node'] is None and data['prompt_id'] == prompt_id:
+                    current_node = data.get('node', None)
+                    if current_node:
+                        last_node = current_node
+                        logger.info(f"Executing node: {current_node}")
+                    if current_node is None and data['prompt_id'] == prompt_id:
                         break
+                elif msg_type == 'execution_error':
+                    error_data = message.get('data', {})
+                    log_tail = get_comfyui_log_tail()
+                    raise Exception(f"ComfyUI execution error on node {error_data.get('node_id','?')}: {error_data.get('exception_message','unknown')}. Log: {log_tail}")
             else:
                 continue
     except websocket.WebSocketTimeoutException:
-        raise Exception("WebSocket receive timeout (10min)")
+        log_tail = get_comfyui_log_tail()
+        raise Exception(f"WebSocket timeout. Last node: {last_node}. Log: {log_tail}")
 
     history = get_history(prompt_id)[prompt_id]
     for node_id in history['outputs']:
@@ -110,6 +131,34 @@ def handler(job):
     job_input = job.get("input", {})
     logger.info(f"Received job input: {json.dumps({k: v[:50] + '...' if isinstance(v, str) and len(v) > 50 else v for k, v in job_input.items()})}")
 
+    # Diagnostic mode: read crash logs without running workflow
+    if job_input.get("action") == "read_log":
+        logs = {}
+        for name, path in [
+            ("comfyui_local", "/tmp/comfyui.log"),
+            ("comfyui_netvolume", os.path.join(os.environ.get("NETWORK_VOLUME_PATH", "/runpod-volume"), "comfyui_debug.log")),
+        ]:
+            try:
+                with open(path, 'r') as f:
+                    logs[name] = f.read()[-8000:]
+            except Exception as e:
+                logs[name] = f"Error reading: {e}"
+        # Also capture system info
+        try:
+            import torch
+            logs["gpu"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
+            logs["torch"] = torch.__version__
+            logs["cuda"] = torch.version.cuda
+            logs["vram_total_mb"] = torch.cuda.get_device_properties(0).total_mem // (1024*1024)
+        except:
+            pass
+        try:
+            result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, timeout=5)
+            logs["disk"] = result.stdout
+        except:
+            pass
+        return logs
+
     task_id = f"/tmp/task_{uuid.uuid4()}"
 
     try:
@@ -148,6 +197,11 @@ def handler(job):
 
         # SageAttention enabled (pre-installed in image)
         prompt["22"]["inputs"]["attention_mode"] = "sageattn"
+
+        # CRITICAL: Force CPU for onnxruntime (SM120/Blackwell not supported by onnxruntime-gpu 1.22)
+        prompt["364"]["inputs"]["onnx_device"] = "CPUExecutionProvider"
+        # Force CPU for taichi pose rendering (SM120 compatibility)
+        prompt["362"]["inputs"]["render_device"] = "cpu"
 
         # ==========================================
         # Node injection
