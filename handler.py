@@ -185,42 +185,42 @@ def handler(job):
 
         # ==========================================
         # WebSocket connection & execution
-        # FAIL-FAST: Don't block waiting for ComfyUI (kills heartbeat)
-        # If ComfyUI not ready, raise exception → RunPod retries job
+        # Match Wan_Animate proven pattern (180s HTTP + 180s WS)
         # ==========================================
         ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
-        http_url = f"http://{server_address}:8188/"
+        logger.info(f"Connecting to WebSocket: {ws_url}")
 
-        # Quick HTTP check - 10 attempts * 3s = 30s max
-        comfyui_ready = False
-        for attempt in range(10):
+        # HTTP connectivity check (max 180s - entrypoint already waited)
+        http_url = f"http://{server_address}:8188/"
+        max_http_attempts = 180
+        for attempt in range(max_http_attempts):
             try:
-                urllib.request.urlopen(http_url, timeout=3)
-                logger.info(f"ComfyUI HTTP OK (attempt {attempt+1})")
-                comfyui_ready = True
+                urllib.request.urlopen(http_url, timeout=5)
+                logger.info(f"HTTP connection OK (attempt {attempt+1})")
                 break
             except Exception:
-                if attempt == 9:
+                if attempt == max_http_attempts - 1:
                     log_tail = ""
                     try:
                         with open('/tmp/comfyui.log', 'r') as f:
-                            log_tail = f.read()[-1000:]
+                            log_tail = f.read()[-2000:]
                     except:
-                        log_tail = "no log"
-                    raise Exception(f"ComfyUI not ready (30s). Will retry. Log: {log_tail}")
-                time.sleep(3)
+                        log_tail = "Could not read ComfyUI log"
+                    raise Exception(f"ComfyUI not reachable after {max_http_attempts}s. Log: {log_tail}")
+                time.sleep(1)
 
-        # Quick WebSocket connect - 3 attempts * 3s = 9s max
+        # WebSocket connection (max 180s)
         ws = websocket.WebSocket()
-        for attempt in range(3):
+        max_ws_attempts = 36
+        for attempt in range(max_ws_attempts):
             try:
                 ws.connect(ws_url)
                 logger.info(f"WebSocket connected (attempt {attempt+1})")
                 break
             except Exception:
-                if attempt == 2:
-                    raise Exception("WebSocket connect failed after 3 attempts")
-                time.sleep(3)
+                if attempt == max_ws_attempts - 1:
+                    raise Exception("WebSocket connection timeout (180s)")
+                time.sleep(5)
 
         # Execute workflow
         videos = get_videos(ws, prompt)

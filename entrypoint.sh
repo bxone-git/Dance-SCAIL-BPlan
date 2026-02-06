@@ -81,10 +81,38 @@ COMFYUI_PID=$!
 echo "ComfyUI started with PID=$COMFYUI_PID, logs at /tmp/comfyui.log"
 
 # ==========================================
-# Start Handler IMMEDIATELY (no waiting for ComfyUI)
-# CRITICAL: Handler must start ASAP so RunPod gets heartbeats
-# ComfyUI loads in background; handler will fail-fast if not ready
+# Wait for ComfyUI (up to 180s / 3 min)
+# Match Wan_Animate proven pattern
+# CRITICAL: No exit 1 here - handler MUST start regardless
+# ==========================================
+echo "Waiting for ComfyUI to be ready..."
+max_wait=180
+wait_count=0
+COMFYUI_READY=0
+while [ $wait_count -lt $max_wait ]; do
+    if curl -s http://127.0.0.1:8188/ > /dev/null 2>&1; then
+        echo "ComfyUI is ready! (after ${wait_count}s)"
+        COMFYUI_READY=1
+        break
+    fi
+    if ! kill -0 $COMFYUI_PID 2>/dev/null; then
+        echo "WARNING: ComfyUI process died after ${wait_count}s!"
+        break
+    fi
+    if [ $((wait_count % 30)) -eq 0 ] && [ $wait_count -gt 0 ]; then
+        echo "  Still waiting for ComfyUI... (${wait_count}/${max_wait}s)"
+    fi
+    sleep 2
+    wait_count=$((wait_count + 2))
+done
+
+if [ $COMFYUI_READY -eq 0 ]; then
+    echo "WARNING: ComfyUI not ready after ${max_wait}s - handler will still start"
+fi
+
+# ==========================================
+# Start Handler (MUST ALWAYS REACH HERE)
 # ==========================================
 echo ""
-echo "Starting RunPod handler immediately (ComfyUI loading in background)..."
+echo "Starting RunPod handler..."
 exec python /handler.py
