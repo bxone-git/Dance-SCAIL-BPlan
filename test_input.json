@@ -1,0 +1,13 @@
+{
+  "input": {
+    "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Lionel_Messi_20180626.jpg/440px-Lionel_Messi_20180626.jpg",
+    "prompt": "the human starts to dance",
+    "negative_prompt": "static, blurry, low quality",
+    "width": 1280,
+    "height": 736,
+    "cfg": 1.0,
+    "seed": 779298828917358,
+    "steps": 6,
+    "fps": 16
+  }
+}
