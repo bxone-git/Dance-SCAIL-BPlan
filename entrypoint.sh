@@ -76,15 +76,15 @@ python -c "import sageattention; print(f'SageAttention: {sageattention.__version
 # ==========================================
 echo ""
 echo "Starting ComfyUI with SageAttention..."
-python /ComfyUI/main.py --listen &
-
-# NOTE: No wait loop here - handler has its own retry logic (180 HTTP + 180 WS attempts)
-# Starting handler immediately so RunPod health check passes quickly
-echo "ComfyUI starting in background, handler will wait for it..."
+python /ComfyUI/main.py --listen > /tmp/comfyui.log 2>&1 &
+COMFYUI_PID=$!
+echo "ComfyUI started with PID=$COMFYUI_PID, logs at /tmp/comfyui.log"
 
 # ==========================================
-# Start Handler (MUST ALWAYS REACH HERE)
+# Start Handler IMMEDIATELY (no waiting for ComfyUI)
+# CRITICAL: Handler must start ASAP so RunPod gets heartbeats
+# ComfyUI loads in background; handler will fail-fast if not ready
 # ==========================================
 echo ""
-echo "Starting RunPod handler..."
+echo "Starting RunPod handler immediately (ComfyUI loading in background)..."
 exec python /handler.py
