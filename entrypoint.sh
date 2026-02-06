@@ -117,5 +117,5 @@ fi
 # Start Handler (MUST ALWAYS REACH HERE)
 # ==========================================
 echo ""
-echo "Starting RunPod handler..."
-exec python /handler.py
+echo "Starting RunPod handler (venv-isolated)..."
+exec /handler_venv/bin/python /handler.py

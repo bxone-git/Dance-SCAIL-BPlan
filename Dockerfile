@@ -69,8 +69,14 @@ RUN mkdir -p /ComfyUI/models/diffusion_models \
     /ComfyUI/models/detection \
     /root/.cache/torch/hub/checkpoints
 
+# Isolated venv for handler (prevents package conflicts with ComfyUI ecosystem)
+# Root cause: packages in system site-packages interfere with runpod SDK job polling
+RUN python -m venv /handler_venv && \
+    /handler_venv/bin/pip install --no-cache-dir runpod websocket-client requests
+
 # Project files
 COPY handler.py /handler.py
+COPY start_worker.py /start_worker.py
 COPY SCAIL_api.json /SCAIL_api.json
 COPY asset/default_video.mp4 /ComfyUI/input/default_video.mp4
 COPY entrypoint.sh /entrypoint.sh
@@ -81,4 +87,7 @@ COPY config.ini /ComfyUI/user/default/ComfyUI-Manager/config.ini
 
 RUN chmod +x /entrypoint.sh
 
-CMD ["/entrypoint.sh"]
+# Use venv Python + start_worker.py (Python-based entrypoint)
+# This avoids bash exec issues and runs handler in isolated venv
+ENTRYPOINT []
+CMD ["/handler_venv/bin/python", "/start_worker.py"]

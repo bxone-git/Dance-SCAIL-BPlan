@@ -1,0 +1,14 @@
+# Quick production build on top of working venv-test base
+# Use this for fast iteration - avoids full rebuild
+# Base: blendx/dance-scail-bplan:venv-test (old working base + handler venv)
+FROM blendx/dance-scail-bplan:venv-test
+
+# Add handler dependencies to venv
+RUN /handler_venv/bin/pip install --no-cache-dir websocket-client requests
+
+# Copy production handler and startup script
+COPY handler.py /handler.py
+COPY start_worker.py /start_worker.py
+
+# Use Python entrypoint (not bash) to avoid exec issues
+CMD ["/handler_venv/bin/python", "/start_worker.py"]

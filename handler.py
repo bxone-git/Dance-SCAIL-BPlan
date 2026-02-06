@@ -143,13 +143,14 @@ def handler(job):
                     logs[name] = f.read()[-8000:]
             except Exception as e:
                 logs[name] = f"Error reading: {e}"
-        # Also capture system info
+        # Capture system info via subprocess (torch is in system python, not handler venv)
         try:
-            import torch
-            logs["gpu"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
-            logs["torch"] = torch.__version__
-            logs["cuda"] = torch.version.cuda
-            logs["vram_total_mb"] = torch.cuda.get_device_properties(0).total_mem // (1024*1024)
+            result = subprocess.run(
+                ['python', '-c', 'import torch; import json; print(json.dumps({"gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A", "torch": torch.__version__, "cuda": torch.version.cuda, "vram_total_mb": torch.cuda.get_device_properties(0).total_mem // (1024*1024) if torch.cuda.is_available() else 0}))'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                logs.update(json.loads(result.stdout.strip()))
         except:
             pass
         try:
