@@ -78,23 +78,9 @@ echo ""
 echo "Starting ComfyUI with SageAttention..."
 python /ComfyUI/main.py --listen &
 
-# Wait for ComfyUI to be ready
-echo "Waiting for ComfyUI..."
-max_wait=180
-wait_count=0
-while [ $wait_count -lt $max_wait ]; do
-    if curl -s http://127.0.0.1:8188/ > /dev/null 2>&1; then
-        echo "ComfyUI is ready! (${wait_count}s)"
-        break
-    fi
-    sleep 2
-    wait_count=$((wait_count + 2))
-done
-
-if [ $wait_count -ge $max_wait ]; then
-    echo "WARNING: ComfyUI did not respond within ${max_wait}s"
-    echo "Handler will start anyway - jobs may fail until ComfyUI is ready"
-fi
+# NOTE: No wait loop here - handler has its own retry logic (180 HTTP + 180 WS attempts)
+# Starting handler immediately so RunPod health check passes quickly
+echo "ComfyUI starting in background, handler will wait for it..."
 
 # ==========================================
 # Start Handler (MUST ALWAYS REACH HERE)
