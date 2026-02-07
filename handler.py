@@ -161,29 +161,29 @@ def handler(job):
         return logs
 
     task_id = f"/tmp/task_{uuid.uuid4()}"
+    # Unique filename for ComfyUI input directory
+    input_filename = f"scail_input_{uuid.uuid4().hex[:8]}.jpg"
+    comfyui_input_path = f"/ComfyUI/input/{input_filename}"
 
     try:
         # ==========================================
         # Image input (dynamic - required)
+        # ComfyUI LoadImage expects filename in /ComfyUI/input/
         # ==========================================
-        image_path = None
+        image_ready = False
 
         if "image_url" in job_input:
-            os.makedirs(task_id, exist_ok=True)
-            image_path = download_image(
-                job_input["image_url"],
-                os.path.abspath(os.path.join(task_id, "input_image.jpg"))
-            )
+            download_image(job_input["image_url"], comfyui_input_path)
+            image_ready = True
         elif "image_path" in job_input:
-            image_path = job_input["image_path"]
+            shutil.copy2(job_input["image_path"], comfyui_input_path)
+            image_ready = True
         elif "image_base64" in job_input:
-            os.makedirs(task_id, exist_ok=True)
-            file_path = os.path.abspath(os.path.join(task_id, "input_image.jpg"))
-            with open(file_path, 'wb') as f:
+            with open(comfyui_input_path, 'wb') as f:
                 f.write(base64.b64decode(job_input["image_base64"]))
-            image_path = file_path
+            image_ready = True
 
-        if image_path is None:
+        if not image_ready:
             raise Exception("Image input required. Provide image_url, image_path, or image_base64")
 
         # ==========================================
@@ -207,8 +207,8 @@ def handler(job):
         # ==========================================
         # Node injection
         # ==========================================
-        # Input image (node 106: LoadImage)
-        prompt["106"]["inputs"]["image"] = image_path
+        # Input image (node 106: LoadImage - expects filename in /ComfyUI/input/)
+        prompt["106"]["inputs"]["image"] = input_filename
 
         # Fixed video (node 130: VHS_LoadVideo)
         prompt["130"]["inputs"]["video"] = video_path
@@ -294,6 +294,8 @@ def handler(job):
     finally:
         if os.path.exists(task_id):
             shutil.rmtree(task_id, ignore_errors=True)
+        if os.path.exists(comfyui_input_path):
+            os.remove(comfyui_input_path)
 
 
 runpod.serverless.start({"handler": handler})
