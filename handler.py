@@ -201,8 +201,8 @@ def handler(job):
         # ==========================================
         prompt = load_workflow('/SCAIL_api.json')
 
-        # SageAttention enabled (pre-installed in image)
-        prompt["22"]["inputs"]["attention_mode"] = "sageattn"
+        # SageAttention 2++ enabled (pre-installed in image)
+        prompt["22"]["inputs"]["attention_mode"] = job_input.get("attention_mode", "sageattn_qk_int8_pv_fp8_cuda")
 
         # CRITICAL: Force CPU for onnxruntime (SM120/Blackwell not supported by onnxruntime-gpu 1.22)
         prompt["364"]["inputs"]["onnx_device"] = "CPUExecutionProvider"
@@ -230,8 +230,12 @@ def handler(job):
             prompt["368"]["inputs"]["negative_prompt"] = job_input["negative_prompt"]
 
         # Dimensions (node 203: width, node 204: height)
-        prompt["203"]["inputs"]["value"] = int(job_input.get("width", 1280))
-        prompt["204"]["inputs"]["value"] = int(job_input.get("height", 736))
+        prompt["203"]["inputs"]["value"] = int(job_input.get("width", 416))
+        prompt["204"]["inputs"]["value"] = int(job_input.get("height", 672))
+
+        # Context frames/overlap (node 355: WanVideoContextOptions)
+        prompt["355"]["inputs"]["context_frames"] = int(job_input.get("context_frames", 81))
+        prompt["355"]["inputs"]["context_overlap"] = int(job_input.get("context_overlap", 16))
 
         # CFG (node 238: FloatConstant)
         prompt["238"]["inputs"]["value"] = float(job_input.get("cfg", 1.0))
@@ -243,7 +247,7 @@ def handler(job):
         prompt["349"]["inputs"]["steps"] = int(job_input.get("steps", 6))
 
         # FPS (node 130: input fps, node 139: output fps)
-        fps = int(job_input.get("fps", 16))
+        fps = int(job_input.get("fps", 24))
         prompt["130"]["inputs"]["force_rate"] = 0
         prompt["139"]["inputs"]["frame_rate"] = fps
 

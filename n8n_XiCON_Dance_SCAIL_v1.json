@@ -1,0 +1,888 @@
+{
+  "name": "XiCON_Dance_SCAIL_v1",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## XiCON Dance SCAIL v1\n### 역할:\n- 인물 이미지 → AI 댄스 영상 생성 (SCAIL-BPlan)\n\n### 입력 데이터 (input_data):\n- image_url: 인물 이미지\n- prompt: 댄스 설명\n\n### Endpoint:\n- 5xaui82bi1ejsq\n\n### 소요시간:\n- ~25분 (RTX 5090)",
+        "height": 380,
+        "width": 500
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1592,
+        144
+      ],
+      "id": "a1000001-0000-0000-0000-000000000001",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  gj.id as job_id,\n  gj.work_id,\n  w.*,\n  t.id as template_id,\n  t.template_name,\n  t.is_active\n\nFROM generation_jobs gj\nINNER JOIN works w ON gj.work_id = w.id\nLEFT JOIN templates t ON w.template_id = t.id\n\nWHERE \n  gj.status = 'pending'\n  AND t.template_name = 'XiCON_Dance_SCAIL_v1'\n  AND t.is_active = true\n  \nORDER BY gj.priority DESC, gj.created_at ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -816,
+        128
+      ],
+      "id": "a1000002-0000-0000-0000-000000000002",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "oK2dPeiNRFB9Po8Q",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "check-jobs-exist",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        128
+      ],
+      "id": "a1000003-0000-0000-0000-000000000003",
+      "name": "IF Jobs Exist1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "generation_jobs",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Execute a SQL query1').item.json.job_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "taken"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        128
+      ],
+      "id": "a1000004-0000-0000-0000-000000000004",
+      "name": "Mark as Taken1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// XiCON Dance SCAIL - Payload Builder\n// ============================================================\n\nconst sqlData = $('Execute a SQL query1').item.json;\nconst inputData = sqlData.input_data || {};\n\nconst image_url = inputData.image_url || \"\";\nconst prompt = inputData.prompt || \"A person dancing energetically\";\n\nreturn {\n  json: {\n    input: {\n      image_url: image_url,\n      prompt: prompt,\n      width: 416,\n      height: 672,\n      steps: 6,\n      cfg: 1.0,\n      fps: 24\n    },\n    work_id: sqlData.id,\n    generation_metadata: JSON.stringify({\n      prompt: prompt,\n      image_url: image_url,\n      model: \"XiCON_Dance_SCAIL\",\n      width: 416,\n      height: 672,\n      fps: 24,\n      steps: 6,\n      submitted_at: new Date().toISOString()\n    })\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        128
+      ],
+      "id": "a1000005-0000-0000-0000-000000000005",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.runpod.ai/v2/5xaui82bi1ejsq/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: $json.input }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -144,
+        128
+      ],
+      "id": "a1000006-0000-0000-0000-000000000006",
+      "name": "Submit to RunPod1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "VnSRamgasodbgGr1",
+          "name": "runpod_serverless_api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "works",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Execute a SQL query1').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "processing"
+            },
+            {
+              "fieldId": "runpod_job_id",
+              "fieldValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        16,
+        128
+      ],
+      "id": "a1000007-0000-0000-0000-000000000007",
+      "name": "Update Works to Processing1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -960,
+        336
+      ],
+      "id": "a1000008-0000-0000-0000-000000000008",
+      "name": "Wait 5s1",
+      "webhookId": "wait-dance-scail"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.runpod.ai/v2/5xaui82bi1ejsq/status/{{ $json.runpod_job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -800,
+        336
+      ],
+      "id": "a1000009-0000-0000-0000-000000000009",
+      "name": "Check RunPod Status1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "VnSRamgasodbgGr1",
+          "name": "runpod_serverless_api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "COMPLETED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "completed-condition"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "completed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "failed-condition",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "FAILED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "cancelled-condition",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "CANCELLED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancelled"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -624,
+        336
+      ],
+      "id": "a1000010-0000-0000-0000-000000000010",
+      "name": "Switch (Status)1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "video_base64",
+              "name": "video_base64",
+              "value": "={{ $('Check RunPod Status1').item.json.output.video }}",
+              "type": "string"
+            },
+            {
+              "id": "filename",
+              "name": "filename",
+              "value": "=XiCON_Dance_{{ $('Execute a SQL query1').item.json.id }}_{{ Date.now() }}.mp4",
+              "type": "string"
+            },
+            {
+              "id": "work_id",
+              "name": "work_id",
+              "value": "={{ $('Execute a SQL query1').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "user_id",
+              "name": "user_id",
+              "value": "={{ $('Execute a SQL query1').item.json.user_id }}",
+              "type": "string"
+            },
+            {
+              "id": "runpod_job_id",
+              "name": "runpod_job_id",
+              "value": "={{ $('Submit to RunPod1').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "project_id",
+              "name": "project_id",
+              "value": "={{ $('Execute a SQL query1').item.json.project_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        336
+      ],
+      "id": "a1000011-0000-0000-0000-000000000011",
+      "name": "Extract Video Data"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "video_base64",
+        "options": {
+          "mimeType": "video/mp4",
+          "fileName": "={{ $json.filename }}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        336
+      ],
+      "id": "a1000012-0000-0000-0000-000000000012",
+      "name": "Convert to File1",
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://inwtsfxxunljfznahixt.supabase.co/storage/v1/object/works/{{ $('Execute a SQL query1').item.json.user_id }}/{{ $('Execute a SQL query1').item.json.project_id }}/{{ $('Extract Video Data').item.json.filename }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -64,
+        336
+      ],
+      "id": "a1000013-0000-0000-0000-000000000013",
+      "name": "Upload to Storage1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2d2J6D3c7qf3JGGP",
+          "name": "Supabase_Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "files",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "bucket_id",
+              "fieldValue": "=works"
+            },
+            {
+              "fieldId": "file_path",
+              "fieldValue": "={{ $('Execute a SQL query1').item.json.user_id }}/{{ $('Execute a SQL query1').item.json.project_id }}/{{ $('Extract Video Data').item.json.filename }}"
+            },
+            {
+              "fieldId": "file_name",
+              "fieldValue": "={{ $('Extract Video Data').item.json.filename }}"
+            },
+            {
+              "fieldId": "file_size",
+              "fieldValue": "={{ $('Upload to Storage1').item.json.size || 0 }}"
+            },
+            {
+              "fieldId": "file_type",
+              "fieldValue": "=video/mp4"
+            },
+            {
+              "fieldId": "created_at",
+              "fieldValue": "={{ $now }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Extract Video Data').item.json.user_id }}"
+            },
+            {
+              "fieldId": "work_id",
+              "fieldValue": "={{ $('Extract Video Data').item.json.work_id }}"
+            },
+            {
+              "fieldId": "file_id",
+              "fieldValue": "={{ $('Upload to Storage1').item.json.Id }}"
+            },
+            {
+              "fieldId": "width",
+              "fieldValue": "=416"
+            },
+            {
+              "fieldId": "height",
+              "fieldValue": "=672"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        112,
+        336
+      ],
+      "id": "a1000014-0000-0000-0000-000000000014",
+      "name": "Create Files Record1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "file_id",
+              "name": "file_id",
+              "value": "={{ $json.file_id }}",
+              "type": "string"
+            },
+            {
+              "id": "work_id",
+              "name": "work_id",
+              "value": "={{ $json.work_id }}",
+              "type": "string"
+            },
+            {
+              "id": "output_data_json",
+              "name": "output_data_json",
+              "value": "={{ $('Build Payload').item.json.generation_metadata }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        336
+      ],
+      "id": "a1000015-0000-0000-0000-000000000015",
+      "name": "Prepare Update Data1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "works",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Extract Video Data').item.json.work_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "completed"
+            },
+            {
+              "fieldId": "output_file_id",
+              "fieldValue": "={{ $('Create Files Record1').item.json.id }}"
+            },
+            {
+              "fieldId": "output_data",
+              "fieldValue": "={{ $json.output_data_json }}"
+            },
+            {
+              "fieldId": "title",
+              "fieldValue": "AI 댄스 영상"
+            },
+            {
+              "fieldId": "tags",
+              "fieldValue": "{\"Dance\", \"SCAIL\", \"영상\", \"AI댄스\"}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        432,
+        336
+      ],
+      "id": "a1000016-0000-0000-0000-000000000016",
+      "name": "Update Works to Completed1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "works",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Execute a SQL query1').item.json.work_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "failed"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        496
+      ],
+      "id": "a1000017-0000-0000-0000-000000000017",
+      "name": "Update Works to Failed1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "works",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Execute a SQL query1').item.json.work_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "cancelled"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        640
+      ],
+      "id": "a1000018-0000-0000-0000-000000000018",
+      "name": "Update Works to Cancelled1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CSWlnQ927dKwfJoO",
+          "name": "Supabase_XICON(TBD)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "work_id",
+              "name": "work_id",
+              "value": "={{ $('Execute a SQL query1').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "runpod_job_id",
+              "name": "runpod_job_id",
+              "value": "={{ $json.id || $('Submit to RunPod1').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "user_id",
+              "name": "user_id",
+              "value": "={{ $('Execute a SQL query1').item.json.user_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        800
+      ],
+      "id": "a1000019-0000-0000-0000-000000000019",
+      "name": "Preserve Input Data1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "IF Jobs Exist1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Jobs Exist1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Mark as Taken1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark as Taken1": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit to RunPod1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit to RunPod1": {
+      "main": [
+        [
+          {
+            "node": "Update Works to Processing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Works to Processing1": {
+      "main": [
+        [
+          {
+            "node": "Wait 5s1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5s1": {
+      "main": [
+        [
+          {
+            "node": "Check RunPod Status1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check RunPod Status1": {
+      "main": [
+        [
+          {
+            "node": "Switch (Status)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch (Status)1": {
+      "main": [
+        [
+          {
+            "node": "Extract Video Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Works to Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Works to Cancelled1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preserve Input Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video Data": {
+      "main": [
+        [
+          {
+            "node": "Convert to File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File1": {
+      "main": [
+        [
+          {
+            "node": "Upload to Storage1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Storage1": {
+      "main": [
+        [
+          {
+            "node": "Create Files Record1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Files Record1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Update Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Update Data1": {
+      "main": [
+        [
+          {
+            "node": "Update Works to Completed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Input Data1": {
+      "main": [
+        [
+          {
+            "node": "Wait 5s1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "26a09eeaa933a3a2d5e5c7464dde43295983bb154399dc6a66530ea2d2ec62e0"
+  },
+  "tags": []
+}
