@@ -29,7 +29,12 @@ def queue_prompt(prompt):
     p = {"prompt": prompt, "client_id": client_id}
     data = json.dumps(p).encode('utf-8')
     req = urllib.request.Request(url, data=data)
-    return json.loads(urllib.request.urlopen(req).read())
+    try:
+        return json.loads(urllib.request.urlopen(req).read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='replace')
+        logger.error(f"ComfyUI prompt rejected (HTTP {e.code}): {error_body[:2000]}")
+        raise Exception(f"ComfyUI HTTP {e.code}: {error_body[:2000]}")
 
 
 def get_history(prompt_id):
@@ -203,6 +208,10 @@ def handler(job):
         prompt["364"]["inputs"]["onnx_device"] = "CPUExecutionProvider"
         # Force CPU for taichi pose rendering (SM120 compatibility)
         prompt["362"]["inputs"]["render_device"] = "cpu"
+
+        # Fix model names to match network volume files
+        prompt["38"]["inputs"]["model_name"] = "wan_2.1_vae.safetensors"
+        prompt["364"]["inputs"]["vitpose_model"] = "vitpose_h_wholebody_model.onnx"
 
         # ==========================================
         # Node injection
