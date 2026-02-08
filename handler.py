@@ -294,12 +294,15 @@ def handler(job):
         videos = get_videos(ws, prompt)
         ws.close()
 
-        # Return first video found
-        for node_id in videos:
-            if videos[node_id]:
-                return {"video": videos[node_id][0]}
+        # Return video from node 139 (Wan Animating final result)
+        # Node 137 = pose skeleton (영상.1), Node 139 = final result (영상.2)
+        target_node = "139"
+        if target_node in videos and videos[target_node]:
+            return {"video": videos[target_node][0]}
 
-        raise Exception("No video output produced")
+        # Fallback: log available nodes for debugging
+        available_nodes = [nid for nid in videos if videos[nid]]
+        raise Exception(f"No video output from target node {target_node}. Available nodes with output: {available_nodes}")
 
     except Exception as e:
         logger.error(f"Handler error: {e}", exc_info=True)
