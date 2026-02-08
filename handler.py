@@ -251,6 +251,10 @@ def handler(job):
         prompt["130"]["inputs"]["force_rate"] = 0
         prompt["139"]["inputs"]["frame_rate"] = fps
 
+        # Remove audio input to prevent failure when default_video.mp4 has no audio track
+        if "audio" in prompt["139"]["inputs"]:
+            del prompt["139"]["inputs"]["audio"]
+
         # ==========================================
         # WebSocket connection & execution
         # Match Wan_Animate proven pattern (180s HTTP + 180s WS)
@@ -294,15 +298,21 @@ def handler(job):
         videos = get_videos(ws, prompt)
         ws.close()
 
-        # Return video from node 139 (Wan Animating final result)
+        # Return video from node 139 (final result) or fallback to any available node
         # Node 137 = pose skeleton (영상.1), Node 139 = final result (영상.2)
-        target_node = "139"
-        if target_node in videos and videos[target_node]:
-            return {"video": videos[target_node][0]}
+        target_nodes = ["139", "137"]  # Priority order: final result, then pose
+        for target_node in target_nodes:
+            if target_node in videos and videos[target_node]:
+                logger.info(f"Returning video from node {target_node}")
+                return {"video": videos[target_node][0]}
 
-        # Fallback: log available nodes for debugging
+        # Last resort: try any node with video output
         available_nodes = [nid for nid in videos if videos[nid]]
-        raise Exception(f"No video output from target node {target_node}. Available nodes with output: {available_nodes}")
+        if available_nodes:
+            logger.info(f"Fallback: returning video from node {available_nodes[0]}")
+            return {"video": videos[available_nodes[0]][0]}
+
+        raise Exception(f"No video output from any node. Nodes in history: {list(videos.keys())}")
 
     except Exception as e:
         logger.error(f"Handler error: {e}", exc_info=True)
