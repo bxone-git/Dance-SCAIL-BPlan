@@ -1,5 +1,5 @@
 # Incremental update - handler.py fix - audio input removal for node 139
-FROM blendx/dance-scail-bplan:production-v6
+FROM blendx/dance-scail-bplan:production-v7
 
 # Update handler.py with node 139 fix
 COPY handler.py /handler.py

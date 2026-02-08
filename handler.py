@@ -30,7 +30,9 @@ def queue_prompt(prompt):
     data = json.dumps(p).encode('utf-8')
     req = urllib.request.Request(url, data=data)
     try:
-        return json.loads(urllib.request.urlopen(req).read())
+        response_data = json.loads(urllib.request.urlopen(req).read())
+        logger.info(f"Queue prompt response: {json.dumps(response_data)[:2000]}")
+        return response_data
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8', errors='replace')
         logger.error(f"ComfyUI prompt rejected (HTTP {e.code}): {error_body[:2000]}")
@@ -55,8 +57,9 @@ def get_comfyui_log_tail(lines=100):
 def get_videos(ws, prompt):
     prompt_id = queue_prompt(prompt)['prompt_id']
     output_videos = {}
+    executed_nodes = set()
 
-    ws.settimeout(900)
+    ws.settimeout(2400)
     last_node = "unknown"
 
     try:
@@ -65,7 +68,7 @@ def get_videos(ws, prompt):
                 out = ws.recv()
             except websocket.WebSocketTimeoutException:
                 log_tail = get_comfyui_log_tail()
-                raise Exception(f"Video generation timeout (15min). Last node: {last_node}. ComfyUI log: {log_tail}")
+                raise Exception(f"Video generation timeout (40min). Last node: {last_node}. ComfyUI log: {log_tail}")
 
             if isinstance(out, str):
                 message = json.loads(out)
@@ -75,6 +78,7 @@ def get_videos(ws, prompt):
                     current_node = data.get('node', None)
                     if current_node:
                         last_node = current_node
+                        executed_nodes.add(current_node)
                         logger.info(f"Executing node: {current_node}")
                     if current_node is None and data['prompt_id'] == prompt_id:
                         break
@@ -82,6 +86,9 @@ def get_videos(ws, prompt):
                     error_data = message.get('data', {})
                     log_tail = get_comfyui_log_tail()
                     raise Exception(f"ComfyUI execution error on node {error_data.get('node_id','?')}: {error_data.get('exception_message','unknown')}. Log: {log_tail}")
+                elif msg_type == 'progress':
+                    progress_data = message.get('data', {})
+                    logger.info(f"Progress node {progress_data.get('node', '?')}: {progress_data.get('value', 0)}/{progress_data.get('max', 0)}")
             else:
                 continue
     except websocket.WebSocketTimeoutException:
@@ -89,6 +96,14 @@ def get_videos(ws, prompt):
         raise Exception(f"WebSocket timeout. Last node: {last_node}. Log: {log_tail}")
 
     history = get_history(prompt_id)[prompt_id]
+    logger.info(f"Executed nodes during WS monitoring: {executed_nodes}")
+    logger.info(f"History output nodes: {list(history['outputs'].keys())}")
+    for node_id in history['outputs']:
+        node_output = history['outputs'][node_id]
+        logger.info(f"Node {node_id} output keys: {list(node_output.keys())}")
+        if 'gifs' in node_output:
+            logger.info(f"Node {node_id} has {len(node_output['gifs'])} video(s)")
+
     for node_id in history['outputs']:
         node_output = history['outputs'][node_id]
         videos_output = []
@@ -108,7 +123,7 @@ def get_videos(ws, prompt):
                 videos_output.append(video_data)
         output_videos[node_id] = videos_output
 
-    return output_videos
+    return output_videos, executed_nodes
 
 
 def load_workflow(workflow_path):
@@ -165,6 +180,141 @@ def handler(job):
             pass
         return logs
 
+    # Diagnostic mode: check ComfyUI node types and model files
+    if job_input.get("action") == "check_nodes":
+        result = {}
+        # Check which node types are registered in ComfyUI
+        try:
+            url = f"http://{server_address}:8188/object_info"
+            with urllib.request.urlopen(url, timeout=30) as response:
+                object_info = json.loads(response.read())
+            # Check for Wan-specific node types
+            wan_nodes = ["WanVideoModelLoader", "WanVideoSamplerv2", "WanVideoDecode",
+                        "WanVideoVAELoader", "WanVideoSetBlockSwap", "WanVideoSetLoRAs",
+                        "WanVideoBlockSwap", "WanVideoLoraSelect", "WanVideoEmptyEmbeds",
+                        "WanVideoClipVisionEncode", "WanVideoAddSCAILPoseEmbeds",
+                        "WanVideoAddSCAILReferenceEmbeds", "WanVideoTextEncodeCached",
+                        "WanVideoSamplerExtraArgs", "WanVideoContextOptions",
+                        "WanVideoSchedulerv2", "CLIPVisionLoader", "GetImageSizeAndCount",
+                        "VHS_VideoCombine"]
+            result["node_types"] = {}
+            for nt in wan_nodes:
+                result["node_types"][nt] = nt in object_info
+            # Count total registered node types
+            result["total_node_types"] = len(object_info)
+        except Exception as e:
+            result["node_types_error"] = str(e)
+
+        # Check model files on network volume
+        try:
+            nv = os.environ.get("NETWORK_VOLUME_PATH", "/runpod-volume")
+            model_dirs = ["checkpoints", "vae", "clip_vision", "loras", "onnx"]
+            result["model_files"] = {}
+            for d in model_dirs:
+                dirpath = os.path.join(nv, "ComfyUI", "models", d)
+                if os.path.isdir(dirpath):
+                    result["model_files"][d] = os.listdir(dirpath)
+                else:
+                    result["model_files"][d] = f"DIR NOT FOUND: {dirpath}"
+        except Exception as e:
+            result["model_files_error"] = str(e)
+
+        # Also check /ComfyUI/models/ directly
+        try:
+            result["comfyui_model_dirs"] = {}
+            for d in os.listdir("/ComfyUI/models"):
+                dirpath = os.path.join("/ComfyUI/models", d)
+                if os.path.isdir(dirpath):
+                    files = os.listdir(dirpath)
+                    if files:
+                        result["comfyui_model_dirs"][d] = files
+        except Exception as e:
+            result["comfyui_models_error"] = str(e)
+
+        # Check extra_model_paths.yaml if it exists
+        for yaml_path in ["/ComfyUI/extra_model_paths.yaml", "/ComfyUI/extra_model_paths.yml"]:
+            if os.path.exists(yaml_path):
+                with open(yaml_path, 'r') as f:
+                    result["extra_model_paths"] = f.read()
+                break
+
+        return result
+
+    # Diagnostic mode: validate prompt without executing
+    if job_input.get("action") == "validate_prompt":
+        result = {}
+        try:
+            prompt = load_workflow('/SCAIL_api.json')
+
+            # Apply same overrides as production
+            prompt["22"]["inputs"]["attention_mode"] = "sageattn"
+            prompt["364"]["inputs"]["onnx_device"] = "CPUExecutionProvider"
+            prompt["362"]["inputs"]["render_device"] = "cpu"
+            prompt["364"]["inputs"]["vitpose_model"] = "vitpose_h_wholebody_model.onnx"
+            prompt["38"]["inputs"]["model_name"] = "wan_2.1_vae.safetensors"
+            prompt["106"]["inputs"]["image"] = "example.jpg"
+            prompt["130"]["inputs"]["video"] = "default_video.mp4"
+            prompt["203"]["inputs"]["value"] = 416
+            prompt["204"]["inputs"]["value"] = 672
+            prompt["355"]["inputs"]["context_frames"] = 81
+            prompt["355"]["inputs"]["context_overlap"] = 16
+            prompt["238"]["inputs"]["value"] = 1.0
+            prompt["348"]["inputs"]["seed"] = 779298828917358
+            prompt["349"]["inputs"]["steps"] = 6
+            prompt["130"]["inputs"]["force_rate"] = 0
+            prompt["139"]["inputs"]["frame_rate"] = 24
+            if "audio" in prompt["139"]["inputs"]:
+                del prompt["139"]["inputs"]["audio"]
+            prompt["139"]["inputs"]["trim_to_audio"] = False
+
+            # Log what we're sending for node 139
+            result["node_139_inputs"] = prompt["139"]["inputs"]
+            result["node_38_inputs"] = prompt["38"]["inputs"]
+            result["node_22_inputs"] = prompt["22"]["inputs"]
+
+            # Try submitting to ComfyUI and capture FULL response
+            url = f"http://{server_address}:8188/prompt"
+            p = {"prompt": prompt, "client_id": "diag_" + str(uuid.uuid4())[:8]}
+            data = json.dumps(p).encode('utf-8')
+            req = urllib.request.Request(url, data=data)
+            try:
+                resp = urllib.request.urlopen(req)
+                resp_data = json.loads(resp.read())
+                result["prompt_accepted"] = True
+                result["prompt_response"] = resp_data
+                # Check which nodes are in the execution plan
+                if "node_errors" in resp_data:
+                    result["node_errors"] = resp_data["node_errors"]
+                if "error" in resp_data:
+                    result["prompt_error"] = resp_data["error"]
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode('utf-8', errors='replace')
+                result["prompt_accepted"] = False
+                result["http_error_code"] = e.code
+                result["error_body"] = error_body[:4000]
+                # Parse the error body for node_errors
+                try:
+                    error_json = json.loads(error_body)
+                    if "node_errors" in error_json:
+                        result["node_errors"] = error_json["node_errors"]
+                    if "error" in error_json:
+                        result["prompt_error"] = error_json["error"]
+                except:
+                    pass
+
+            # Also check if default_video.mp4 and example files exist
+            result["input_files"] = {
+                "default_video": os.path.exists("/ComfyUI/input/default_video.mp4"),
+                "comfyui_input_dir": os.listdir("/ComfyUI/input/") if os.path.isdir("/ComfyUI/input/") else "NOT FOUND"
+            }
+
+        except Exception as e:
+            result["error"] = str(e)
+            import traceback
+            result["traceback"] = traceback.format_exc()
+
+        return result
+
     task_id = f"/tmp/task_{uuid.uuid4()}"
     # Unique filename for ComfyUI input directory
     input_filename = f"scail_input_{uuid.uuid4().hex[:8]}.jpg"
@@ -202,7 +352,7 @@ def handler(job):
         prompt = load_workflow('/SCAIL_api.json')
 
         # SageAttention 2++ enabled (pre-installed in image)
-        prompt["22"]["inputs"]["attention_mode"] = job_input.get("attention_mode", "sageattn_qk_int8_pv_fp8_cuda")
+        prompt["22"]["inputs"]["attention_mode"] = job_input.get("attention_mode", "sageattn")
 
         # CRITICAL: Force CPU for onnxruntime (SM120/Blackwell not supported by onnxruntime-gpu 1.22)
         prompt["364"]["inputs"]["onnx_device"] = "CPUExecutionProvider"
@@ -210,8 +360,9 @@ def handler(job):
         prompt["362"]["inputs"]["render_device"] = "cpu"
 
         # Fix model names to match network volume files
-        prompt["38"]["inputs"]["model_name"] = "wan_2.1_vae.safetensors"
         prompt["364"]["inputs"]["vitpose_model"] = "vitpose_h_wholebody_model.onnx"
+        # VAE model: workflow expects "Wan2.1_VAE.pth" but volume has "wan_2.1_vae.safetensors"
+        prompt["38"]["inputs"]["model_name"] = "wan_2.1_vae.safetensors"
 
         # ==========================================
         # Node injection
@@ -254,6 +405,18 @@ def handler(job):
         # Remove audio input to prevent failure when default_video.mp4 has no audio track
         if "audio" in prompt["139"]["inputs"]:
             del prompt["139"]["inputs"]["audio"]
+        # Ensure trim_to_audio is false when audio is removed
+        prompt["139"]["inputs"]["trim_to_audio"] = False
+
+        # ==========================================
+        # Debug: Log critical Wan pipeline nodes before submission
+        # ==========================================
+        logger.info(f"Node 139 inputs: {json.dumps(prompt['139']['inputs'])}")
+        logger.info(f"Node 139 class_type: {prompt['139'].get('class_type')}")
+        logger.info(f"Node 348 inputs keys: {list(prompt['348']['inputs'].keys())}")
+        logger.info(f"Node 28 inputs keys: {list(prompt['28']['inputs'].keys())}")
+        logger.info(f"Node 22 inputs keys: {list(prompt['22']['inputs'].keys())}")
+        logger.info(f"Node 38 inputs: {json.dumps(prompt['38']['inputs'])}")
 
         # ==========================================
         # WebSocket connection & execution
@@ -295,24 +458,31 @@ def handler(job):
                 time.sleep(5)
 
         # Execute workflow
-        videos = get_videos(ws, prompt)
+        videos, executed_nodes = get_videos(ws, prompt)
         ws.close()
 
-        # Return video from node 139 (final result) or fallback to any available node
-        # Node 137 = pose skeleton (영상.1), Node 139 = final result (영상.2)
-        target_nodes = ["139", "137"]  # Priority order: final result, then pose
-        for target_node in target_nodes:
-            if target_node in videos and videos[target_node]:
-                logger.info(f"Returning video from node {target_node}")
-                return {"video": videos[target_node][0]}
+        # Validate Wan pipeline critical nodes executed
+        wan_critical_nodes = {"22", "38", "348", "28", "139"}
+        missing_wan = wan_critical_nodes - executed_nodes
+        if missing_wan:
+            logger.warning(f"Wan pipeline nodes did NOT execute: {missing_wan}")
 
-        # Last resort: try any node with video output
-        available_nodes = [nid for nid in videos if videos[nid]]
-        if available_nodes:
-            logger.info(f"Fallback: returning video from node {available_nodes[0]}")
-            return {"video": videos[available_nodes[0]][0]}
-
-        raise Exception(f"No video output from any node. Nodes in history: {list(videos.keys())}")
+        # Return video from node 139 (Wan Animate final result)
+        if "139" in videos and videos["139"]:
+            logger.info("Returning Wan Animate video from node 139")
+            return {"video": videos["139"][0]}
+        elif "137" in videos and videos["137"]:
+            # Wan pipeline failed but pose succeeded — this is an ERROR
+            logger.error("Node 139 (Wan Animate) has no output! Only skeleton (137) available.")
+            logger.error(f"Executed nodes: {executed_nodes}")
+            logger.error(f"History nodes with video: {[nid for nid in videos if videos[nid]]}")
+            raise Exception(
+                f"Wan Animate pipeline failed - only skeleton video produced. "
+                f"Missing Wan nodes: {missing_wan}. "
+                f"Executed nodes: {executed_nodes}. Check VAE model and GPU memory."
+            )
+        else:
+            raise Exception(f"No video output from any node. Nodes in history: {list(videos.keys())}")
 
     except Exception as e:
         logger.error(f"Handler error: {e}", exc_info=True)
