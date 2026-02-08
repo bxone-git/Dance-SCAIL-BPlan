@@ -261,7 +261,8 @@ def handler(job):
             prompt["238"]["inputs"]["value"] = 1.0
             prompt["348"]["inputs"]["seed"] = 779298828917358
             prompt["349"]["inputs"]["steps"] = 6
-            prompt["130"]["inputs"]["force_rate"] = 0
+            prompt["130"]["inputs"]["force_rate"] = 24
+            prompt["137"]["inputs"]["frame_rate"] = 24
             prompt["139"]["inputs"]["frame_rate"] = 24
             if "audio" in prompt["139"]["inputs"]:
                 del prompt["139"]["inputs"]["audio"]
@@ -397,10 +398,11 @@ def handler(job):
         # Steps (node 349: WanVideoSchedulerv2)
         prompt["349"]["inputs"]["steps"] = int(job_input.get("steps", 6))
 
-        # FPS (node 130: input fps, node 139: output fps)
+        # FPS (node 130: input fps, node 137: pose output fps, node 139: final output fps)
         fps = int(job_input.get("fps", 24))
-        prompt["130"]["inputs"]["force_rate"] = 0
-        prompt["139"]["inputs"]["frame_rate"] = fps
+        prompt["130"]["inputs"]["force_rate"] = fps  # Force input video to target fps (was 0 = native rate)
+        prompt["137"]["inputs"]["frame_rate"] = fps  # Pose skeleton video at target fps
+        prompt["139"]["inputs"]["frame_rate"] = fps  # Final output video at target fps
 
         # Remove audio input to prevent failure when default_video.mp4 has no audio track
         if "audio" in prompt["139"]["inputs"]:

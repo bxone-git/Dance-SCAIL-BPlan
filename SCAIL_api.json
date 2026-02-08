@@ -204,7 +204,7 @@
   },
   "137": {
     "inputs": {
-      "frame_rate": 16,
+      "frame_rate": 24,
       "loop_count": 0,
       "filename_prefix": "onetotall_pose",
       "format": "video/h264-mp4",
@@ -226,7 +226,7 @@
   },
   "139": {
     "inputs": {
-      "frame_rate": 16,
+      "frame_rate": 24,
       "loop_count": 0,
       "filename_prefix": "1323",
       "format": "video/h264-mp4",

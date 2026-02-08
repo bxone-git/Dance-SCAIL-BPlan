@@ -1,5 +1,7 @@
-# Incremental update - handler.py fix - audio input removal for node 139
-FROM blendx/dance-scail-bplan:production-v7
+# Incremental update - fix frame rate to 24fps across all video nodes
+FROM blendx/dance-scail-bplan:production-v12
 
-# Update handler.py with node 139 fix
+# Update handler.py with 24fps fix (force_rate + node 137/139 frame_rate)
 COPY handler.py /handler.py
+# Update SCAIL_api.json with 24fps default frame_rate values
+COPY SCAIL_api.json /SCAIL_api.json
