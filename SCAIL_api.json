@@ -115,10 +115,7 @@
         "107",
         2
       ],
-      "num_frames": [
-        "130",
-        1
-      ]
+      "num_frames": 325
     },
     "class_type": "WanVideoEmptyEmbeds",
     "_meta": {
@@ -163,12 +160,12 @@
   "130": {
     "inputs": {
       "video": "RunComfy_examples_1323.mp4",
-      "force_rate": 0,
+      "force_rate": 24,
       "custom_width": 0,
       "custom_height": 0,
       "frame_load_cap": 357,
       "skip_first_frames": 0,
-      "select_every_nth": 2,
+      "select_every_nth": 1,
       "format": "AnimateDiff"
     },
     "class_type": "VHS_LoadVideo",
@@ -252,7 +249,7 @@
   },
   "203": {
     "inputs": {
-      "value": 1280
+      "value": 416
     },
     "class_type": "INTConstant",
     "_meta": {
@@ -261,7 +258,7 @@
   },
   "204": {
     "inputs": {
-      "value": 736
+      "value": 672
     },
     "class_type": "INTConstant",
     "_meta": {
@@ -463,9 +460,9 @@
   "355": {
     "inputs": {
       "context_schedule": "uniform_standard",
-      "context_frames": 121,
+      "context_frames": 80,
       "context_stride": 4,
-      "context_overlap": 48,
+      "context_overlap": 20,
       "freenoise": true,
       "verbose": false,
       "fuse_method": "linear"

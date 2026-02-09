@@ -89,6 +89,12 @@ def get_videos(ws, prompt):
                 elif msg_type == 'progress':
                     progress_data = message.get('data', {})
                     logger.info(f"Progress node {progress_data.get('node', '?')}: {progress_data.get('value', 0)}/{progress_data.get('max', 0)}")
+                elif msg_type == 'executed':
+                    exec_data = message.get('data', {})
+                    exec_node = exec_data.get('node', '')
+                    exec_output = exec_data.get('output', {})
+                    if exec_node in ('130', '323', '99', '28'):
+                        logger.info(f"FRAME_TRACE executed node {exec_node}: {json.dumps(exec_output)[:1000]}")
             else:
                 continue
     except websocket.WebSocketTimeoutException:
@@ -96,6 +102,18 @@ def get_videos(ws, prompt):
         raise Exception(f"WebSocket timeout. Last node: {last_node}. Log: {log_tail}")
 
     history = get_history(prompt_id)[prompt_id]
+
+    # Multi-stage frame count tracing
+    logger.info("=" * 60)
+    logger.info("FRAME_TRACE: Multi-stage pipeline frame count analysis")
+    for trace_node in ["130", "99", "323", "28"]:
+        if trace_node in history.get('outputs', {}):
+            node_out = history['outputs'][trace_node]
+            logger.info(f"FRAME_TRACE node {trace_node}: {json.dumps(node_out)[:1000]}")
+        else:
+            logger.info(f"FRAME_TRACE node {trace_node}: NOT in history outputs")
+    logger.info("=" * 60)
+
     logger.info(f"Executed nodes during WS monitoring: {executed_nodes}")
     logger.info(f"History output nodes: {list(history['outputs'].keys())}")
     for node_id in history['outputs']:
@@ -240,6 +258,108 @@ def handler(job):
 
         return result
 
+    # Diagnostic mode: check video file properties
+    if job_input.get("action") == "check_video_info":
+        result = {}
+        video_path = "/ComfyUI/input/default_video.mp4"
+
+        if not os.path.exists(video_path):
+            return {"error": f"Video not found at {video_path}"}
+
+        result["file_size_bytes"] = os.path.getsize(video_path)
+
+        # ffprobe for detailed video properties
+        try:
+            r = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                 '-show_streams', '-show_format', '-count_frames',
+                 video_path],
+                capture_output=True, text=True, timeout=120
+            )
+            if r.returncode == 0:
+                info = json.loads(r.stdout)
+                for stream in info.get("streams", []):
+                    if stream.get("codec_type") == "video":
+                        result["native_fps"] = stream.get("r_frame_rate")
+                        result["avg_fps"] = stream.get("avg_frame_rate")
+                        result["nb_frames"] = stream.get("nb_frames")
+                        result["nb_read_frames"] = stream.get("nb_read_frames")
+                        result["duration_seconds"] = stream.get("duration")
+                        result["width"] = stream.get("width")
+                        result["height"] = stream.get("height")
+                        result["codec"] = stream.get("codec_name")
+                result["format_duration"] = info.get("format", {}).get("duration")
+            else:
+                result["ffprobe_stderr"] = r.stderr[:2000]
+        except FileNotFoundError:
+            result["ffprobe_error"] = "ffprobe not found - trying python fallback"
+            try:
+                r2 = subprocess.run(
+                    ['python', '-c', f'''
+import cv2, json
+cap = cv2.VideoCapture("{video_path}")
+info = {{
+    "fps": cap.get(cv2.CAP_PROP_FPS),
+    "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+    "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+    "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+    "duration_seconds": cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 0
+}}
+cap.release()
+print(json.dumps(info))
+'''],
+                    capture_output=True, text=True, timeout=30
+                )
+                if r2.returncode == 0:
+                    result["opencv_info"] = json.loads(r2.stdout.strip())
+            except Exception as e2:
+                result["opencv_error"] = str(e2)
+        except Exception as e:
+            result["ffprobe_error"] = str(e)
+
+        # Calculate expected frames at 24fps
+        dur = None
+        if "duration_seconds" in result and result["duration_seconds"]:
+            dur = float(result["duration_seconds"])
+        elif "format_duration" in result and result["format_duration"]:
+            dur = float(result["format_duration"])
+        if dur:
+            result["expected_frames_at_24fps"] = int(dur * 24)
+            result["video_duration_seconds"] = dur
+
+        return result
+
+    # Diagnostic mode: read VHS_LoadVideo source code for AnimateDiff analysis
+    if job_input.get("action") == "check_vhs_source":
+        result = {"vhs_files": {}}
+        vhs_base = "/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/"
+
+        if not os.path.isdir(vhs_base):
+            return {"error": f"VHS not found at {vhs_base}"}
+
+        for root, dirs, files in os.walk(vhs_base):
+            for f in files:
+                if f.endswith('.py'):
+                    filepath = os.path.join(root, f)
+                    try:
+                        with open(filepath, 'r') as fh:
+                            content = fh.read()
+                        if any(kw in content for kw in ['AnimateDiff', 'frame_load_cap', 'format', 'force_rate']):
+                            result["vhs_files"][filepath] = content[:4000]
+                    except Exception as e:
+                        result["vhs_files"][filepath] = f"Error: {e}"
+
+        try:
+            r = subprocess.run(
+                ['git', '-C', vhs_base, 'log', '--oneline', '-5'],
+                capture_output=True, text=True, timeout=10
+            )
+            result["vhs_git_log"] = r.stdout[:500]
+        except:
+            pass
+
+        return result
+
     # Diagnostic mode: validate prompt without executing
     if job_input.get("action") == "validate_prompt":
         result = {}
@@ -256,8 +376,9 @@ def handler(job):
             prompt["130"]["inputs"]["video"] = "default_video.mp4"
             prompt["203"]["inputs"]["value"] = 416
             prompt["204"]["inputs"]["value"] = 672
-            prompt["355"]["inputs"]["context_frames"] = 81
-            prompt["355"]["inputs"]["context_overlap"] = 16
+            prompt["355"]["inputs"]["context_frames"] = 121
+            prompt["355"]["inputs"]["context_overlap"] = 48
+            prompt["99"]["inputs"]["num_frames"] = 325
             prompt["238"]["inputs"]["value"] = 1.0
             prompt["348"]["inputs"]["seed"] = 779298828917358
             prompt["349"]["inputs"]["steps"] = 6
@@ -373,6 +494,7 @@ def handler(job):
 
         # Fixed video (node 130: VHS_LoadVideo)
         prompt["130"]["inputs"]["video"] = video_path
+        prompt["130"]["inputs"]["select_every_nth"] = int(job_input.get("select_every_nth", 1))
 
         # Text prompts (node 368: WanVideoTextEncodeCached)
         prompt["368"]["inputs"]["positive_prompt"] = job_input.get(
@@ -386,8 +508,24 @@ def handler(job):
         prompt["204"]["inputs"]["value"] = int(job_input.get("height", 672))
 
         # Context frames/overlap (node 355: WanVideoContextOptions)
-        prompt["355"]["inputs"]["context_frames"] = int(job_input.get("context_frames", 81))
-        prompt["355"]["inputs"]["context_overlap"] = int(job_input.get("context_overlap", 16))
+        context_frames = int(job_input.get("context_frames", 80))
+        context_overlap = int(job_input.get("context_overlap", 20))
+        prompt["355"]["inputs"]["context_frames"] = context_frames
+        prompt["355"]["inputs"]["context_overlap"] = context_overlap
+
+        # Frame load cap: load all frames from input video (357 default)
+        frame_load_cap = int(job_input.get("frame_load_cap", 357))
+        prompt["130"]["inputs"]["frame_load_cap"] = frame_load_cap
+        logger.info(f"Frame settings: load_cap={frame_load_cap}, select_every_nth={prompt['130']['inputs']['select_every_nth']}, context_frames={context_frames}, overlap={context_overlap}")
+
+        # Calculate and inject num_frames directly into WanVideoEmptyEmbeds
+        # Formula: match input video frame count to valid WanVideo value ((N-1)%4==0)
+        # Default video: 30fps * 13.6s = 408 raw -> resample to 24fps = 326 -> nearest valid = 325
+        raw_frames = int(job_input.get("num_frames", 325))
+        # Ensure valid WanVideo frame count: (N-1) must be divisible by 4
+        valid_num_frames = ((raw_frames - 1) // 4) * 4 + 1
+        prompt["99"]["inputs"]["num_frames"] = valid_num_frames
+        logger.info(f"WanVideoEmptyEmbeds num_frames set to {valid_num_frames} (from raw={raw_frames})")
 
         # CFG (node 238: FloatConstant)
         prompt["238"]["inputs"]["value"] = float(job_input.get("cfg", 1.0))
@@ -398,11 +536,11 @@ def handler(job):
         # Steps (node 349: WanVideoSchedulerv2)
         prompt["349"]["inputs"]["steps"] = int(job_input.get("steps", 6))
 
-        # FPS (node 130: input fps, node 137: pose output fps, node 139: final output fps)
+        # FPS settings (all unified to same frame rate)
         fps = int(job_input.get("fps", 24))
-        prompt["130"]["inputs"]["force_rate"] = fps  # Force input video to target fps (was 0 = native rate)
-        prompt["137"]["inputs"]["frame_rate"] = fps  # Pose skeleton video at target fps
-        prompt["139"]["inputs"]["frame_rate"] = fps  # Final output video at target fps
+        prompt["130"]["inputs"]["force_rate"] = fps  # Input video resampling
+        prompt["137"]["inputs"]["frame_rate"] = fps  # Pose skeleton video output
+        prompt["139"]["inputs"]["frame_rate"] = fps  # Final output video
 
         # Remove audio input to prevent failure when default_video.mp4 has no audio track
         if "audio" in prompt["139"]["inputs"]:

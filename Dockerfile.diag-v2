@@ -1,0 +1,13 @@
+# Diagnostic v2 - overlay on WORKING production base
+FROM blendx/dance-scail-bplan:production-v5-claudecode
+
+# Add handler dependencies to venv (may already exist, just ensure)
+RUN /handler_venv/bin/pip install --no-cache-dir websocket-client requests
+
+# Copy updated handler with FRAME_TRACE diagnostics
+COPY handler.py /handler.py
+COPY SCAIL_api.json /SCAIL_api.json
+COPY start_worker.py /start_worker.py
+
+# Use Python entrypoint
+CMD ["/handler_venv/bin/python", "/start_worker.py"]
