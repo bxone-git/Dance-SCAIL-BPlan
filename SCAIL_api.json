@@ -115,7 +115,10 @@
         "107",
         2
       ],
-      "num_frames": 325
+      "num_frames": [
+        "130",
+        1
+      ]
     },
     "class_type": "WanVideoEmptyEmbeds",
     "_meta": {

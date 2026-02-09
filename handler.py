@@ -518,14 +518,18 @@ print(json.dumps(info))
         prompt["130"]["inputs"]["frame_load_cap"] = frame_load_cap
         logger.info(f"Frame settings: load_cap={frame_load_cap}, select_every_nth={prompt['130']['inputs']['select_every_nth']}, context_frames={context_frames}, overlap={context_overlap}")
 
-        # Calculate and inject num_frames directly into WanVideoEmptyEmbeds
-        # Formula: match input video frame count to valid WanVideo value ((N-1)%4==0)
-        # Default video: 30fps * 13.6s = 408 raw -> resample to 24fps = 326 -> nearest valid = 325
-        raw_frames = int(job_input.get("num_frames", 325))
-        # Ensure valid WanVideo frame count: (N-1) must be divisible by 4
-        valid_num_frames = ((raw_frames - 1) // 4) * 4 + 1
-        prompt["99"]["inputs"]["num_frames"] = valid_num_frames
-        logger.info(f"WanVideoEmptyEmbeds num_frames set to {valid_num_frames} (from raw={raw_frames})")
+        # num_frames: VHS_LoadVideo output[1] (frame_count) is now connected via ["130", 1]
+        # in SCAIL_api.json, so it flows dynamically. However, if user provides explicit
+        # num_frames override, we inject it. Also ensure WanVideo validity: (N-1)%4==0
+        if "num_frames" in job_input:
+            raw_frames = int(job_input["num_frames"])
+            valid_num_frames = ((raw_frames - 1) // 4) * 4 + 1
+            prompt["99"]["inputs"]["num_frames"] = valid_num_frames
+            logger.info(f"WanVideoEmptyEmbeds num_frames overridden to {valid_num_frames} (from raw={raw_frames})")
+        else:
+            # Let VHS_LoadVideo dynamically set num_frames via node connection ["130", 1]
+            # ComfyUI will pass VHS frame_count directly to WanVideoEmptyEmbeds
+            logger.info("WanVideoEmptyEmbeds num_frames: dynamic from VHS_LoadVideo connection")
 
         # CFG (node 238: FloatConstant)
         prompt["238"]["inputs"]["value"] = float(job_input.get("cfg", 1.0))
