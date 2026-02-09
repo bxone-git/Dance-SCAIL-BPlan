@@ -376,9 +376,9 @@ print(json.dumps(info))
             prompt["130"]["inputs"]["video"] = "default_video.mp4"
             prompt["203"]["inputs"]["value"] = 416
             prompt["204"]["inputs"]["value"] = 672
-            prompt["355"]["inputs"]["context_frames"] = 121
-            prompt["355"]["inputs"]["context_overlap"] = 48
-            prompt["99"]["inputs"]["num_frames"] = 325
+            prompt["355"]["inputs"]["context_frames"] = 80
+            prompt["355"]["inputs"]["context_overlap"] = 20
+            # num_frames: keep dynamic VHS connection ["130", 1] from SCAIL_api.json
             prompt["238"]["inputs"]["value"] = 1.0
             prompt["348"]["inputs"]["seed"] = 779298828917358
             prompt["349"]["inputs"]["steps"] = 6
